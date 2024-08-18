@@ -1,5 +1,5 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, CallbackContext, ChatMemberHandler, filters
 import time
 
@@ -47,7 +47,7 @@ async def confirm_ban_all(update: Update, context: CallbackContext):
     
     try:
         # Get all members of the chat (this requires the bot to have the necessary permissions)
-        members = await bot.get_chat_administrators(chat_id)
+        members = await bot.get_chat_members_count(chat_id)
         
         for member in members:
             user_id = member.user.id
@@ -65,51 +65,52 @@ async def confirm_ban_all(update: Update, context: CallbackContext):
         await query.edit_message_text("An error occurred while banning users.")
 
 async def monitor_admin_actions(update: Update, context: CallbackContext):
-    admin_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    
-    current_time = time.time()
-    
-    # Initialize or update the admin's action log
-    if admin_id not in admin_actions:
-        admin_actions[admin_id] = []
-    
-    # Add the current action with a timestamp
-    admin_actions[admin_id].append(current_time)
-    
-    # Filter out actions that are outside the monitoring period
-    admin_actions[admin_id] = [t for t in admin_actions[admin_id] if current_time - t < MONITORING_PERIOD]
-    
-    # Check if the admin has exceeded the action threshold
-    if len(admin_actions[admin_id]) > ADMIN_ACTION_THRESHOLD:
-        try:
-            # Demote the admin
-            await context.bot.promote_chat_member(
-                chat_id, admin_id,
-                can_change_info=False,
-                can_delete_messages=False,
-                can_invite_users=False,
-                can_restrict_members=False,
-                can_pin_messages=False,
-                can_promote_members=False,
-                can_manage_video_chats=False,
-                is_anonymous=False
-            )
-            
-            # Pin a message with details
-            banned_user_ids = [member.user.id for member in admin_actions[admin_id]]
-            banned_usernames = ", ".join([f"@{user.username or 'unknown'}" for user in banned_user_ids])
-            pin_message = (
-                f"⚠️ Admin @{update.effective_user.username or 'unknown'} (ID: {admin_id}) has been demoted for banning/kicking more than {ADMIN_ACTION_THRESHOLD} members.\n"
-                f"List of banned/kicked users: {banned_usernames}"
-            )
-            message = await context.bot.send_message(chat_id, pin_message)
-            await context.bot.pin_chat_message(chat_id, message.message_id)
-            
-            # Reset the admin's action log
+    if update.chat_member.new_chat_member.status == 'kicked':
+        admin_id = update.chat_member.from_user.id
+        chat_id = update.effective_chat.id
+        banned_user_id = update.chat_member.new_chat_member.user.id
+        
+        current_time = time.time()
+        
+        # Initialize or update the admin's action log
+        if admin_id not in admin_actions:
             admin_actions[admin_id] = []
-        except Exception as e:
-            logger.error(f"Failed to demote admin {admin_id}: {e}")
+        
+        # Add the current action with a timestamp
+        admin_actions[admin_id].append((banned_user_id, current_time))
+        
+        # Filter out actions that are outside the monitoring period
+        admin_actions[admin_id] = [(uid, t) for uid, t in admin_actions[admin_id] if current_time - t < MONITORING_PERIOD]
+        
+        # Check if the admin has exceeded the action threshold
+        if len(admin_actions[admin_id]) > ADMIN_ACTION_THRESHOLD:
+            try:
+                # Demote the admin
+                await context.bot.promote_chat_member(
+                    chat_id, admin_id,
+                    can_change_info=False,
+                    can_delete_messages=False,
+                    can_invite_users=False,
+                    can_restrict_members=False,
+                    can_pin_messages=False,
+                    can_promote_members=False,
+                    can_manage_video_chats=False,
+                    is_anonymous=False
+                )
+                
+                # Pin a message with details
+                banned_usernames = ", ".join([f"@{context.bot.get_chat_member(chat_id, uid).user.username or 'unknown'}" for uid, _ in admin_actions[admin_id]])
+                pin_message = (
+                    f"⚠️ Admin @{update.chat_member.from_user.username or 'unknown'} (ID: {admin_id}) has been demoted for banning/kicking more than {ADMIN_ACTION_THRESHOLD} members.\n"
+                    f"List of banned/kicked users: {banned_usernames}"
+                )
+                message = await context.bot.send_message(chat_id, pin_message)
+                await context.bot.pin_chat_message(chat_id, message.message_id)
+                
+                # Reset the admin's action log
+                admin_actions[admin_id] = []
+            except Exception as e:
+                logger.error(f"Failed to demote admin {admin_id}: {e}")
 
 def main():
     # Create the Application and pass it your bot's token
@@ -120,7 +121,7 @@ def main():
     application.add_handler(CallbackQueryHandler(confirm_ban_all, pattern='confirm_ban_all'))
 
     # Monitor chat member updates to track bans/kicks
-    application.add_handler(ChatMemberHandler(monitor_admin_actions, filters.StatusUpdate.BANNED))
+    application.add_handler(ChatMemberHandler(monitor_admin_actions, filters.ChatMemberUpdated()))
 
     # Start the Bot
     application.run_polling()
