@@ -1,6 +1,6 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, CallbackContext, ChatMemberHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, CallbackContext, ChatMemberHandler
 import time
 
 # Define constants
@@ -99,7 +99,7 @@ async def monitor_admin_actions(update: Update, context: CallbackContext):
                 )
                 
                 # Pin a message with details
-                banned_usernames = ", ".join([f"@{context.bot.get_chat_member(chat_id, uid).user.username or 'unknown'}" for uid, _ in admin_actions[admin_id]])
+                banned_usernames = ", ".join([f"@{(await context.bot.get_chat_member(chat_id, uid)).user.username or 'unknown'}" for uid, _ in admin_actions[admin_id]])
                 pin_message = (
                     f"⚠️ Admin @{update.chat_member.from_user.username or 'unknown'} (ID: {admin_id}) has been demoted for banning/kicking more than {ADMIN_ACTION_THRESHOLD} members.\n"
                     f"List of banned/kicked users: {banned_usernames}"
@@ -121,7 +121,7 @@ def main():
     application.add_handler(CallbackQueryHandler(confirm_ban_all, pattern='confirm_ban_all'))
 
     # Monitor chat member updates to track bans/kicks
-    application.add_handler(ChatMemberHandler(monitor_admin_actions, filters.ChatMemberUpdated()))
+    application.add_handler(ChatMemberHandler(monitor_admin_actions))
 
     # Start the Bot
     application.run_polling()
